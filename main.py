@@ -188,7 +188,7 @@ async def cmd_all_users(message: types.Message):
 
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
-    cur.execute("SELECT user_id, username, first_name")
+    cur.execute("SELECT user_id, username, first_name, last_name FROM users")
     users = cur.fetchall()
     conn.close()
 
@@ -230,7 +230,6 @@ async def cmd_info(message: types.Message):
             f"🆔 ID: {user_id}\n"
             f"👤 Имя: {first_name}\n"
             f"🏷️ Логин: @{username if username else '—'}\n"
-            f"👥 Фамилия: {last_name if last_name else '—'}"
         )
     else:
         await message.answer("😕 Тебя нет в базе. Напиши /start, чтобы я тебя запомнил!")
