@@ -188,7 +188,7 @@ async def cmd_all_users(message: types.Message):
 
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
-    cur.execute("SELECT user_id, username, first_name, last_name FROM users")
+    cur.execute("SELECT user_id, username, first_name")
     users = cur.fetchall()
     conn.close()
 
