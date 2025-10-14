@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 
 # === Настройки ===
 BOT_TOKEN = "7990184193:AAFNGY0LhBz8Cb7bmH8BukCFSnlTFNC4OPE"
-ADMIN_ID = 620224188  # Замените на свой Telegram ID
+ADMIN_ID = 620224188  # Твой Telegram ID
 
 # === База данных ===
 def init_db():
@@ -109,10 +109,12 @@ def get_user_info(user_id):
     conn.close()
     return user
 
-# === FSM (состояния для добавления фильмов/сериалов) ===
+# === FSM (состояния) ===
 class AddContent(StatesGroup):
     film = State()
     serial = State()
+    delete_film = State()
+    delete_serial = State()
 
 # === Настройка бота ===
 bot = Bot(token=BOT_TOKEN)
@@ -180,6 +182,54 @@ async def process_add_serial(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Сериал *{title}* успешно добавлен!", parse_mode="Markdown")
     await state.clear()
 
+# === Удаление фильмов и сериалов (только админ) ===
+@dp.message(Command("delete_film"))
+async def cmd_delete_film(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У тебя нет прав для удаления фильмов.")
+        return
+    await message.answer("🗑 Введите название фильма, который хотите удалить:")
+    await state.set_state(AddContent.delete_film)
+
+@dp.message(AddContent.delete_film)
+async def process_delete_film(message: types.Message, state: FSMContext):
+    title = message.text.strip()
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM films WHERE title = ?", (title,))
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    if deleted > 0:
+        await message.answer(f"✅ Фильм '{title}' успешно удалён!")
+    else:
+        await message.answer(f"⚠️ Фильм '{title}' не найден в базе.")
+    await state.clear()
+
+@dp.message(Command("delete_serial"))
+async def cmd_delete_serial(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У тебя нет прав для удаления сериалов.")
+        return
+    await message.answer("🗑 Введите название сериала, который хотите удалить:")
+    await state.set_state(AddContent.delete_serial)
+
+@dp.message(AddContent.delete_serial)
+async def process_delete_serial(message: types.Message, state: FSMContext):
+    title = message.text.strip()
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM serials WHERE title = ?", (title,))
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    if deleted > 0:
+        await message.answer(f"✅ Сериал '{title}' успешно удалён!")
+    else:
+        await message.answer(f"⚠️ Сериал '{title}' не найден в базе.")
+    await state.clear()
+
+# === Просмотр всех пользователей и их избранного ===
 @dp.message(Command("all_users"))
 async def cmd_all_users(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -196,22 +246,20 @@ async def cmd_all_users(message: types.Message):
         await message.answer("База пользователей пока пуста.")
         return
 
-    # Формируем сообщение
     response = "📋 Список всех пользователей:\n\n"
     for user_id, username, first_name, last_name in users:
         favorites = get_favorites(user_id)
         favorites_str = "\n• ".join(favorites) if favorites else "—"
         response += (
-            f"🆔 {user_id} | 👤 {first_name} {last_name if last_name else ''} | "
-            f"🏷️ @{username if username else '—'}\n"
+            f"🆔 {user_id} | 👤 {first_name or ''} {last_name or ''} | "
+            f"🏷️ @{username or '—'}\n"
             f"💖 Избранное:\n• {favorites_str}\n\n"
         )
 
-    # Telegram ограничивает длину сообщения (~4096 символов), поэтому разбиваем на части
     for i in range(0, len(response), 4000):
         await message.answer(response[i:i+4000])
 
-# === Обработчики команд ===
+# === Остальные команды ===
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     add_user(message.from_user)
@@ -229,7 +277,7 @@ async def cmd_info(message: types.Message):
             f"🧾 Твоя информация:\n"
             f"🆔 ID: {user_id}\n"
             f"👤 Имя: {first_name}\n"
-            f"🏷️ Логин: @{username if username else '—'}\n"
+            f"🏷️ Логин: @{username if username else '—'}"
         )
     else:
         await message.answer("😕 Тебя нет в базе. Напиши /start, чтобы я тебя запомнил!")
@@ -254,7 +302,7 @@ async def text_handler(message: types.Message):
             )
             await message.answer(f"🎬 *{title}*\n\n_{review}_", parse_mode="Markdown", reply_markup=inline_kb)
         else:
-            await message.answer("😢 В базе пока нет фильмов. Добавь их командой /add_film")
+            await message.answer("😢 В базе пока нет фильмов.")
     elif text == "📺 случайный сериал":
         conn = sqlite3.connect("users.db")
         cur = conn.cursor()
@@ -271,7 +319,7 @@ async def text_handler(message: types.Message):
             )
             await message.answer(f"📺 *{title}*\n\n_{review}_", parse_mode="Markdown", reply_markup=inline_kb)
         else:
-            await message.answer("😢 В базе пока нет сериалов. Добавь их командой /add_serial")
+            await message.answer("😢 В базе пока нет сериалов.")
     elif text == "❤️ избранное":
         favorites = get_favorites(message.from_user.id)
         if favorites:
@@ -288,7 +336,7 @@ async def text_handler(message: types.Message):
     else:
         await message.answer("Я тебя не понял 😅\nВыбери кнопку: фильм, сериал, избранное или профиль.")
 
-# === Обработчик callback ===
+# === Callback ===
 @dp.callback_query()
 async def callback_handler(callback: types.CallbackQuery):
     if callback.data.startswith("add_favorite_"):
@@ -308,7 +356,6 @@ async def main():
     init_db()
     logging.info("Бот запущен...")
     await dp.start_polling(bot)
+
 if __name__ == "__main__":
     asyncio.run(main())
-
-
