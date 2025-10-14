@@ -185,20 +185,29 @@ async def cmd_all_users(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ У вас нет прав для просмотра всех пользователей.")
         return
-    # Подключаемся к базе
+
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
     cur.execute("SELECT user_id, username, first_name, last_name FROM users")
     users = cur.fetchall()
     conn.close()
+
     if not users:
         await message.answer("База пользователей пока пуста.")
         return
+
+    # Формируем сообщение
     response = "📋 Список всех пользователей:\n\n"
     for user_id, username, first_name, last_name in users:
-        response += f"🆔 {user_id} | 👤 {first_name} {last_name if last_name else ''} | 🏷️ @{username if username else '—'}\n"
-    # Telegram имеет ограничение на длину сообщения (~4096 символов)
-    # Разбиваем на блоки, если слишком длинное
+        favorites = get_favorites(user_id)
+        favorites_str = "\n• ".join(favorites) if favorites else "—"
+        response += (
+            f"🆔 {user_id} | 👤 {first_name} {last_name if last_name else ''} | "
+            f"🏷️ @{username if username else '—'}\n"
+            f"💖 Избранное:\n• {favorites_str}\n\n"
+        )
+
+    # Telegram ограничивает длину сообщения (~4096 символов), поэтому разбиваем на части
     for i in range(0, len(response), 4000):
         await message.answer(response[i:i+4000])
 
