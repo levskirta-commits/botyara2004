@@ -354,7 +354,7 @@ async def callback_handler(callback: types.CallbackQuery):
 # === Точка входа ===
 async def main():
     init_db()
-    logging.info("Бот запущен...")
+    logging.info("Бот запущен..")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
