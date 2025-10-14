@@ -4,6 +4,8 @@ import sqlite3
 import random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
@@ -15,32 +17,44 @@ logging.basicConfig(level=logging.INFO)
 
 # === Настройки ===
 BOT_TOKEN = "7990184193:AAFNGY0LhBz8Cb7bmH8BukCFSnlTFNC4OPE"
-ADMIN_ID = 620224188
+ADMIN_ID = 620224188  # Замените на свой Telegram ID
 
 # === База данных ===
 def init_db():
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             first_name TEXT,
             last_name TEXT
         )
-    """
-    )
-    cur.execute(
-        """
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS favorites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             title TEXT,
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
-    """
-    )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS films (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            review TEXT,
+            url TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS serials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            review TEXT,
+            url TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -48,10 +62,7 @@ def add_user(user):
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
     cur.execute(
-        """
-        INSERT OR IGNORE INTO users (user_id, username, first_name, last_name)
-        VALUES (?, ?, ?, ?)
-    """,
+        "INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
         (user.id, user.username, user.first_name, user.last_name),
     )
     conn.commit()
@@ -60,9 +71,7 @@ def add_user(user):
 def is_favorite_exists(user_id, title):
     conn = sqlite3.connect("users.db")
     cur = conn.cursor()
-    cur.execute(
-        "SELECT 1 FROM favorites WHERE user_id = ? AND title = ?", (user_id, title)
-    )
+    cur.execute("SELECT 1 FROM favorites WHERE user_id = ? AND title = ?", (user_id, title))
     exists = cur.fetchone() is not None
     conn.close()
     return exists
@@ -71,13 +80,7 @@ def add_favorite(user_id, title):
     if not is_favorite_exists(user_id, title):
         conn = sqlite3.connect("users.db")
         cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO favorites (user_id, title)
-            VALUES (?, ?)
-        """,
-            (user_id, title),
-        )
+        cur.execute("INSERT INTO favorites (user_id, title) VALUES (?, ?)", (user_id, title))
         conn.commit()
         conn.close()
         return True
@@ -106,11 +109,16 @@ def get_user_info(user_id):
     conn.close()
     return user
 
+# === FSM (состояния для добавления фильмов/сериалов) ===
+class AddContent(StatesGroup):
+    film = State()
+    serial = State()
+
 # === Настройка бота ===
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# === Клавиатуры ===
+# === Клавиатура ===
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [
@@ -125,15 +133,74 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-# === Заглушки фильмов и сериалов ===
-FILMS = ["Начало", "Титаник", "Матрица", "Интерстеллар", "Джокер"]
-SERIALS = [
-    "Игра престолов",
-    "Очень странные дела",
-    "Во все тяжкие",
-    "Шерлок",
-    "Бумажный дом",
-]
+# === Команды администратора ===
+@dp.message(Command("add_film"))
+async def cmd_add_film(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Эта команда доступна только администратору.")
+        return
+    await message.answer("📽 Введите фильм в формате:\nНазвание | Краткая рецензия | Ссылка")
+    await state.set_state(AddContent.film)
+
+@dp.message(AddContent.film)
+async def process_add_film(message: types.Message, state: FSMContext):
+    parts = message.text.split("|")
+    if len(parts) != 3:
+        await message.answer("⚠️ Неверный формат. Используй: Название | Рецензия | Ссылка")
+        return
+    title, review, url = [p.strip() for p in parts]
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("INSERT INTO films (title, review, url) VALUES (?, ?, ?)", (title, review, url))
+    conn.commit()
+    conn.close()
+    await message.answer(f"✅ Фильм *{title}* успешно добавлен!", parse_mode="Markdown")
+    await state.clear()
+
+@dp.message(Command("add_serial"))
+async def cmd_add_serial(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Эта команда доступна только администратору.")
+        return
+    await message.answer("📺 Введите сериал в формате:\nНазвание | Краткая рецензия | Ссылка")
+    await state.set_state(AddContent.serial)
+
+@dp.message(AddContent.serial)
+async def process_add_serial(message: types.Message, state: FSMContext):
+    parts = message.text.split("|")
+    if len(parts) != 3:
+        await message.answer("⚠️ Неверный формат. Используй: Название | Рецензия | Ссылка")
+        return
+    title, review, url = [p.strip() for p in parts]
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("INSERT INTO serials (title, review, url) VALUES (?, ?, ?)", (title, review, url))
+    conn.commit()
+    conn.close()
+    await message.answer(f"✅ Сериал *{title}* успешно добавлен!", parse_mode="Markdown")
+    await state.clear()
+
+@dp.message(Command("all_users"))
+async def cmd_all_users(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет прав для просмотра всех пользователей.")
+        return
+    # Подключаемся к базе
+    conn = sqlite3.connect("users.db")
+    cur = conn.cursor()
+    cur.execute("SELECT user_id, username, first_name, last_name FROM users")
+    users = cur.fetchall()
+    conn.close()
+    if not users:
+        await message.answer("База пользователей пока пуста.")
+        return
+    response = "📋 Список всех пользователей:\n\n"
+    for user_id, username, first_name, last_name in users:
+        response += f"🆔 {user_id} | 👤 {first_name} {last_name if last_name else ''} | 🏷️ @{username if username else '—'}\n"
+    # Telegram имеет ограничение на длину сообщения (~4096 символов)
+    # Разбиваем на блоки, если слишком длинное
+    for i in range(0, len(response), 4000):
+        await message.answer(response[i:i+4000])
 
 # === Обработчики команд ===
 @dp.message(Command("start"))
@@ -159,102 +226,61 @@ async def cmd_info(message: types.Message):
     else:
         await message.answer("😕 Тебя нет в базе. Напиши /start, чтобы я тебя запомнил!")
 
-@dp.message(Command("all_users"))
-async def cmd_all_users(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ У вас нет прав для просмотра всех пользователей.")
-        return
-
-    conn = sqlite3.connect("users.db")
-    cur = conn.cursor()
-    cur.execute("SELECT user_id, username, first_name, last_name FROM users")
-    users = cur.fetchall()
-    conn.close()
-
-    if not users:
-        await message.answer("База пользователей пока пуста.")
-        return
-
-    for user_id, username, first_name, last_name in users:
-        favorites = get_favorites(user_id)
-        favorites_str = "\n• ".join(favorites) if favorites else "—"
-        response = (
-            f"📋 Пользователь:\n"
-            f"🆔 {user_id} | 👤 {first_name} {last_name if last_name else ''} | 🏷️ @{username if username else '—'}\n"
-            f"💖 Избранное:\n• {favorites_str}"
-        )
-        await message.answer(response)
-
 # === Обработчик текстовых сообщений ===
 @dp.message()
 async def text_handler(message: types.Message):
     text = message.text.lower()
-
     if text == "🎬 случайный фильм":
-        film = random.choice(FILMS)
-        inline_kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="➕ Добавить в избранное",
-                        callback_data=f"add_favorite_{film}",
-                    )
+        conn = sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("SELECT title, review, url FROM films ORDER BY RANDOM() LIMIT 1")
+        film = cur.fetchone()
+        conn.close()
+        if film:
+            title, review, url = film
+            inline_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="➕ Добавить в избранное", callback_data=f"add_favorite_{title}")],
+                    [InlineKeyboardButton(text="🔗 Смотреть", url=url)],
                 ]
-            ]
-        )
-        await message.answer(
-            f"🎬 Рекомендую фильм: *{film}*",
-            parse_mode="Markdown",
-            reply_markup=inline_kb,
-        )
-
+            )
+            await message.answer(f"🎬 *{title}*\n\n_{review}_", parse_mode="Markdown", reply_markup=inline_kb)
+        else:
+            await message.answer("😢 В базе пока нет фильмов. Добавь их командой /add_film")
     elif text == "📺 случайный сериал":
-        serial = random.choice(SERIALS)
-        inline_kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="➕ Добавить в избранное",
-                        callback_data=f"add_favorite_{serial}",
-                    )
+        conn = sqlite3.connect("users.db")
+        cur = conn.cursor()
+        cur.execute("SELECT title, review, url FROM serials ORDER BY RANDOM() LIMIT 1")
+        serial = cur.fetchone()
+        conn.close()
+        if serial:
+            title, review, url = serial
+            inline_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="➕ Добавить в избранное", callback_data=f"add_favorite_{title}")],
+                    [InlineKeyboardButton(text="🔗 Смотреть", url=url)],
                 ]
-            ]
-        )
-        await message.answer(
-            f"📺 Рекомендую сериал: *{serial}*",
-            parse_mode="Markdown",
-            reply_markup=inline_kb,
-        )
-
+            )
+            await message.answer(f"📺 *{title}*\n\n_{review}_", parse_mode="Markdown", reply_markup=inline_kb)
+        else:
+            await message.answer("😢 В базе пока нет сериалов. Добавь их командой /add_serial")
     elif text == "❤️ избранное":
         favorites = get_favorites(message.from_user.id)
         if favorites:
             favorites_kb = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="🗑️ Очистить избранное",
-                            callback_data="clear_favorites",
-                        )
-                    ]
+                    [InlineKeyboardButton(text="🗑️ Очистить избранное", callback_data="clear_favorites")]
                 ]
             )
-            await message.answer(
-                f"💖 Твоё избранное:\n• " + "\n• ".join(favorites),
-                reply_markup=favorites_kb,
-            )
+            await message.answer(f"💖 Твоё избранное:\n• " + "\n• ".join(favorites), reply_markup=favorites_kb)
         else:
             await message.answer("Твоё избранное пусто 😢")
-
     elif text == "ℹ️ мой профиль":
         await cmd_info(message)
-
     else:
-        await message.answer(
-            "Я тебя не понял 😅\nВыбери кнопку: фильм, сериал, избранное или профиль."
-        )
+        await message.answer("Я тебя не понял 😅\nВыбери кнопку: фильм, сериал, избранное или профиль.")
 
-# === Обработчик callback-запросов ===
+# === Обработчик callback ===
 @dp.callback_query()
 async def callback_handler(callback: types.CallbackQuery):
     if callback.data.startswith("add_favorite_"):
@@ -264,7 +290,6 @@ async def callback_handler(callback: types.CallbackQuery):
         else:
             await callback.answer(f"⚠️ '{title}' уже в избранном!")
         await callback.message.edit_reply_markup(reply_markup=None)
-
     elif callback.data == "clear_favorites":
         clear_favorites(callback.from_user.id)
         await callback.answer("🗑️ Избранное очищено!")
@@ -275,6 +300,7 @@ async def main():
     init_db()
     logging.info("Бот запущен...")
     await dp.start_polling(bot)
-
 if __name__ == "__main__":
     asyncio.run(main())
+
+
